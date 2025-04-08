@@ -2,6 +2,7 @@ package com.esgdev.imhotep;
 
 import org.jocl.*;
 
+import java.nio.ByteBuffer;
 import java.util.logging.Logger;
 
 import static org.jocl.CL.*;
@@ -22,6 +23,7 @@ public class JoclProcessor {
     private cl_device_id device;
 
     public JoclProcessor() {
+        enumeratePlatforms();
         initOpenCL();
     }
 
@@ -45,7 +47,7 @@ public class JoclProcessor {
         this.context = clCreateContext(null, 1, new cl_device_id[]{this.device}, null, null, null);
         cl_queue_properties properties = new cl_queue_properties();
         this.commandQueue = clCreateCommandQueueWithProperties(context, device, properties, null);
-        enumeratePlatforms();
+
     }
 
     private void enumeratePlatforms() {
@@ -70,7 +72,102 @@ public class JoclProcessor {
         // Log platform information
         for (int i = 0; i < numPlatforms[0]; i++) {
             logger.info(getPlatformInfoString(platform[i]));
+            enumerateDevices(platform[i]);
         }
+    }
+
+    private void enumerateDevices(cl_platform_id platform) {
+        int[] numDevices = new int[1];
+
+        // Get the number of devices
+        int ret = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, null, numDevices);
+        if (ret != CL_SUCCESS) {
+            logger.severe("Error getting number of devices: " + ret);
+            return;
+        }
+        logger.info("Number of devices: " + numDevices[0]);
+
+        // Get the device IDs
+        cl_device_id[] devices = new cl_device_id[numDevices[0]];
+        ret = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numDevices[0], devices, null);
+        if (ret != CL_SUCCESS) {
+            logger.severe("Error getting device IDs: " + ret);
+            return;
+        }
+
+        // Log device information
+        for (int i = 0; i < numDevices[0]; i++) {
+            logger.info(getDeviceInfoString(devices[i]));
+        }
+    }
+
+    private static String getDeviceInfoString(cl_device_id device) {
+        StringBuilder sb = new StringBuilder();
+
+        String[] attributeNames = {
+                "CL_DEVICE_NAME",
+                "CL_DEVICE_TYPE",
+                "CL_DEVICE_VENDOR",
+                "CL_DEVICE_VERSION",
+                "CL_DRIVER_VERSION",
+                "CL_DEVICE_MAX_COMPUTE_UNITS",
+                "CL_DEVICE_MAX_WORK_ITEM_SIZES"
+        };
+
+        int[] attributeValues = {
+                CL_DEVICE_NAME,
+                CL_DEVICE_TYPE,
+                CL_DEVICE_VENDOR,
+                CL_DEVICE_VERSION,
+                CL_DRIVER_VERSION,
+                CL_DEVICE_MAX_COMPUTE_UNITS,
+                CL_DEVICE_MAX_WORK_ITEM_SIZES
+        };
+
+        for (int i = 0; i < attributeNames.length; i++) {
+            String attributeName = attributeNames[i];
+            int attributeValue = attributeValues[i];
+
+            long[] size = new long[1];
+            clGetDeviceInfo(device, attributeValue, 0, null, size);
+            byte[] buffer = new byte[(int) size[0]];
+            clGetDeviceInfo(device, attributeValue, buffer.length, Pointer.to(buffer), null);
+            if (attributeValue == CL_DEVICE_TYPE) {
+                long clDeviceType = ByteBuffer.wrap(buffer).order(java.nio.ByteOrder.nativeOrder()).getLong(0);
+                sb.append(attributeName)
+                        .append(": ")
+                        .append(stringFor_cl_device_type(clDeviceType))
+                        .append("\n");
+            } else if (attributeValue == CL_DEVICE_MAX_COMPUTE_UNITS) {
+                int maxComputeUnits = ByteBuffer.wrap(buffer).order(java.nio.ByteOrder.nativeOrder()).getInt(0);
+                sb.append(attributeName)
+                        .append(": ")
+                        .append(maxComputeUnits)
+                        .append("\n");
+            } else if (attributeValue == CL_DEVICE_MAX_WORK_ITEM_SIZES) {
+                int maxWorkItemSizes = ByteBuffer.wrap(buffer).order(java.nio.ByteOrder.nativeOrder()).getInt(0);
+                sb.append(attributeName)
+                        .append(": ")
+                        .append(maxWorkItemSizes)
+                        .append("\n");
+            }
+            else {
+                sb.append(attributeName)
+                        .append(": ")
+                        .append(new String(buffer, 0, buffer.length - 1))
+                        .append("\n");
+            }
+        }
+
+        return sb.toString();
+    }
+
+    private static String getDeviceTypeString(long deviceType) {
+        if ((deviceType & CL_DEVICE_TYPE_CPU) != 0) return "CPU";
+        if ((deviceType & CL_DEVICE_TYPE_GPU) != 0) return "GPU";
+        if ((deviceType & CL_DEVICE_TYPE_ACCELERATOR) != 0) return "ACCELERATOR";
+        if ((deviceType & CL_DEVICE_TYPE_DEFAULT) != 0) return "DEFAULT";
+        return "UNKNOWN";
     }
 
     private static String getPlatformInfoString(cl_platform_id platform) {
